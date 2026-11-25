@@ -1,0 +1,2366 @@
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local P = Players.LocalPlayer
+if not P then return end
+local PG = P:FindFirstChildOfClass("PlayerGui") or P:WaitForChild("PlayerGui", 10)
+if not PG then return end
+
+-- Eski kalıntıları temizle
+for _, name in ipairs({
+	"SynapseHub_MorpherEdition",
+	"SynapseHub_PurchasePrompt",
+	"SynapseHub_DonationNotification",
+	"AnimPackGUI"
+}) do
+	local old = PG:FindFirstChild(name)
+	if old then old:Destroy() end
+end
+
+local hadStaleMorph = false
+while true do
+	local old = workspace:FindFirstChild("SAE_MorphShell", true)
+	if not old then break end
+	old:Destroy()
+	hadStaleMorph = true
+end
+if hadStaleMorph and P.Character then
+	for _, part in ipairs(P.Character:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.LocalTransparencyModifier = 0
+		elseif (part:IsA("Decal") or part:IsA("Texture")) and part.Transparency == 1 then
+			part.Transparency = 0
+		end
+	end
+end
+
+-- Bakiye Yönetimi
+_G.SynapseBalance = (_G.SynapseBalance or 1200000) + 500000
+
+local function formatRobux(amount)
+	local formatted = tostring(amount)
+	while true do
+		local k
+		formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", "%1,%2")
+		if k == 0 then break end
+	end
+	return formatted
+end
+
+local C = {
+	panelBg = Color3.fromRGB(18, 12, 30),
+	darkPurple = Color3.fromRGB(24, 15, 42),
+	cardDark = Color3.fromRGB(12, 8, 22),
+	lightGray = Color3.fromRGB(240, 243, 250),
+	mutedGray = Color3.fromRGB(130, 120, 150),
+	buttonPurple = Color3.fromRGB(110, 30, 195),
+	borderPurple = Color3.fromRGB(85, 30, 145),
+	promptBorder = Color3.fromRGB(60, 60, 70),
+	fillBlue = Color3.fromRGB(0, 85, 220)
+}
+
+local function corner(o, r)
+	local x = Instance.new("UICorner")
+	x.CornerRadius = UDim.new(0, r or 14)
+	x.Parent = o
+	return x
+end
+
+local function stroke(o, col, t)
+	local x = Instance.new("UIStroke")
+	x.Color = col or C.borderPurple
+	x.Thickness = t or 1
+	x.Parent = o
+	return x
+end
+
+local function addShadow(par)
+	local shadow = Instance.new("ImageLabel")
+	shadow.Name = "DropShadow"
+	shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+	shadow.Position = UDim2.new(0.5, 0, 0.5, 4)
+	shadow.Size = UDim2.new(1, 24, 1, 24)
+	shadow.BackgroundTransparency = 1
+	shadow.Image = "rbxassetid://6014261993"
+	shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+	shadow.ImageTransparency = 0.45
+	shadow.ScaleType = Enum.ScaleType.Slice
+	shadow.SliceCenter = Rect.new(49, 49, 450, 450)
+	shadow.ZIndex = par.ZIndex - 1
+	shadow.Parent = par
+end
+
+-- ==========================================
+-- KALICI ANIM PACK KAYIT SİSTEMİ
+-- ==========================================
+local animSaveFile = "SynapseHub_AnimPack.json"
+local skipSavedAnimOnce = false
+
+local function saveAnimPackToDisk(packName)
+	pcall(function()
+		if writefile then
+			writefile(animSaveFile, HttpService:JSONEncode({ pack = packName or "" }))
+		end
+	end)
+end
+
+local function clearSavedAnimPackFromDisk()
+	pcall(function()
+		if delfile and isfile and isfile(animSaveFile) then
+			delfile(animSaveFile)
+		end
+	end)
+	pcall(function()
+		if writefile then
+			writefile(animSaveFile, HttpService:JSONEncode({ pack = "" }))
+		end
+	end)
+end
+
+local function loadAnimPackFromDisk()
+	local savedPack = nil
+	pcall(function()
+		if readfile and isfile and isfile(animSaveFile) then
+			local decoded = HttpService:JSONDecode(readfile(animSaveFile))
+			if type(decoded) == "table" and type(decoded.pack) == "string" and decoded.pack ~= "" then
+				savedPack = decoded.pack
+			end
+		end
+	end)
+	return savedPack
+end
+
+-- ==========================================
+-- ANIMATION PACKS VERİ VE MOTORU
+-- ==========================================
+local PACKS = {
+	["Adidas Sports"] = {
+		WalkAnim = 18537392113,
+		RunAnim  = 18537384940,
+		JumpAnim = 18537380791,
+		FallAnim = 18537367238,
+		SwimIdle = 18537387180,
+		Swim     = 18537389531,
+		Animation1 = 18537376492,
+		Animation2 = 18537371272,
+		ClimbAnim = 18537363391,
+	},
+	["Adidas Community"] = {
+		WalkAnim = 122150855457006,
+		RunAnim  = 82598234841035,
+		JumpAnim = 75290611992385,
+		FallAnim = 98600215928904,
+		SwimIdle = 109346520324160,
+		Swim     = 133308483266208,
+		Animation1 = 122257458498464,
+		Animation2 = 102357151005774,
+		ClimbAnim = 88763136693023,
+	},
+	["Adidas Aura"] = {
+		WalkAnim = 83842218823011,
+		RunAnim  = 118320322718866,
+		JumpAnim = 109996626521204,
+		FallAnim = 95603166884636,
+		SwimIdle = 94922130551805,
+		Swim     = 134530128383903,
+		Animation1 = 110211186840347,
+		Animation2 = 114191137265065,
+		ClimbAnim = 97824616490448,
+	},
+	["Wicked Popular"] = {
+		WalkAnim = 92072849924640,
+		RunAnim = 72301599441680,
+		JumpAnim = 104325245285198,
+		FallAnim = 121152442762481,
+		Animation1 = 118832222982049,
+		ClimbAnim = 131326830509784,
+		SwimIdle = 113199415118199,
+		Swim = 99384245425157,
+		Animation2 = 76049494037641,
+	},
+	Elder = {
+		WalkAnim = 10921111375,
+		RunAnim  = 10921104374,
+		JumpAnim = 10921107367,
+		FallAnim = 10921105765,
+		SwimIdle = 10921110146,
+		Swim     = 10921108971,
+		ClimbAnim = 10921100400,
+		Animation1 = 10921101664,
+		Animation2 = 10921102574,
+	},
+	Zombie = {
+		WalkAnim = 10921355261,
+		RunAnim  = 616163682,
+		JumpAnim = 10921351278,
+		FallAnim = 10921350320,
+		SwimIdle = 10921353442,
+		Swim     = 10921352344,
+		Animation1 = 10921344533,
+		Animation2 = 10921345304,
+		ClimbAnim = 10921343576,
+	},
+	Mage = {
+		WalkAnim = 10921152678,
+		RunAnim  = 10921148209,
+		JumpAnim = 10921149743,
+		FallAnim = 10921148939,
+		SwimIdle = 10921151661,
+		Swim     = 10921150788,
+		ClimbAnim = 10921143404,
+		Animation1 = 10921144709,
+		Animation2 = 10921145797,
+	},
+	["Catwalk Glam"] = {
+		WalkAnim = 109168724482748,
+		RunAnim  = 81024476153754,
+		JumpAnim = 116936326516985,
+		FallAnim = 92294537340807,
+		SwimIdle = 98854111361360,
+		Swim     = 134591743181628,
+		ClimbAnim = 119377220967554,
+		Animation1 = 133806214992291,
+		Animation2 = 94970088341563,
+	},
+	Astronaut = {
+		WalkAnim = 10921046031,
+		RunAnim  = 10921039308,
+		JumpAnim = 10921042494,
+		FallAnim = 10921040576,
+		SwimIdle = 10921045006,
+		Swim     = 10921044000,
+		ClimbAnim = 10921032124,
+		Animation1 = 10921034824,
+		Animation2 = 10921036806,
+	},
+	['Wicked "Dancing Through Life"'] = {
+		WalkAnim = 73718308412641,
+		RunAnim  = 135515454877967,
+		JumpAnim = 78508480717326,
+		FallAnim = 78147885297412,
+		SwimIdle = 129183123083281,
+		Swim     = 110657013921774,
+		ClimbAnim = 129447497744818,
+		Animation1 = 92849173543269,
+		Animation2 = 132238900951109,
+	},
+	Werewolf = {
+		WalkAnim = 10921342074,
+		RunAnim  = 10921336997,
+		JumpAnim = nil,
+		FallAnim = 10921337907,
+		SwimIdle = 10921341319,
+		Swim     = 10921340419,
+		ClimbAnim = 10921329322,
+		Animation1 = 10921330408,
+		Animation2 = 10921333667,
+	},
+	Superhero = {
+		WalkAnim = 10921298616,
+		RunAnim  = 10921291831,
+		JumpAnim = 10921294559,
+		FallAnim = 10921293373,
+		SwimIdle = 10921297391,
+		Swim     = 10921295495,
+		ClimbAnim = 10921286911,
+		Animation1 = 10921288909,
+		Animation2 = 10921290167,
+	},
+	Toy = {
+		WalkAnim = 10921312010,
+		RunAnim  = 10921306285,
+		JumpAnim = 10921308158,
+		FallAnim = 10921307241,
+		SwimIdle = 10921310341,
+		Swim     = 10921309319,
+		ClimbAnim = 10921300839,
+		Animation1 = 10921301576,
+		Animation2 = nil,
+	},
+	["No Boundaries"] = {
+		WalkAnim = 18747074203,
+		RunAnim  = 18747070484,
+		JumpAnim = 18747069148,
+		FallAnim = 18747062535,
+		SwimIdle = 18747071682,
+		Swim     = 18747073181,
+		ClimbAnim = 18747060903,
+		Animation1 = 18747067405,
+		Animation2 = 18747063918,
+	},
+	NFL = {
+		WalkAnim = 110358958299415,
+		RunAnim  = 117333533048078,
+		JumpAnim = 119846112151352,
+		FallAnim = 129773241321032,
+		SwimIdle = 79090109939093,
+		Swim     = 132697394189921,
+		ClimbAnim = 134630013742019,
+		Animation1 = 92080889861410,
+		Animation2 = 74451233229259,
+	},
+	["Amazon Unboxed"] = {
+		WalkAnim = 90478085024465,
+		RunAnim  = 134824450619865,
+		JumpAnim = 121454505477205,
+		FallAnim = 94788218468396,
+		SwimIdle = 129126268464847,
+		Swim     = 105962919001086,
+		ClimbAnim = 121145883950231,
+		Animation1 = 98281136301627,
+		Animation2 = nil,
+	},
+	Vampire = {
+		WalkAnim = 10921326949,
+		RunAnim  = 10921320299,
+		JumpAnim = 10921322186,
+		FallAnim = 10921321317,
+		SwimIdle = 10921325443,
+		Swim     = 10921324408,
+		ClimbAnim = 10921314188,
+		Animation1 = 10921315373,
+		Animation2 = nil,
+	},
+	["Ninja"] = {
+		Run = 656118852, Walk = 656121766, Jump = 656117878, Fall = 656115606,
+		Swim = 656119721, SwimIdle = 656121397, Climb = 656114359,
+		Idle = {656117400, 656118341, 886742569}
+	},
+	["Robot"] = {
+		Run = 616091570, Walk = 616095330, Jump = 616090535, Fall = 616087089,
+		Swim = 616092998, SwimIdle = 616094091, Climb = 616086039,
+		Idle = {616088211, 616089559, 885531463}
+	},
+	["Levitation"] = {
+		Run = 616010382, Walk = 616013216, Jump = 616008936, Fall = 616005863,
+		Swim = 616011509, SwimIdle = 616012453, Climb = 616003713,
+		Idle = {616006778, 616008087, 886862142}
+	},
+	["Stylish"] = {
+		Run = 616140816, Walk = 616146177, Jump = 616139451, Fall = 616134815,
+		Swim = 616143378, SwimIdle = 616144772, Climb = 616133594,
+		Idle = {616136790, 616138447, 886888594}
+	},
+	["Bubbly"] = {
+		Run = 910025107, Walk = 910034870, Jump = 910016857, Fall = 910001910,
+		Swim = 910028158, SwimIdle = 910030921, Climb = 909997997,
+		Idle = {910004836, 910009958, 1018536639}
+	},
+	["Cartoon"] = {
+		Run = 742638842, Walk = 742640026, Jump = 742637942, Fall = 742637151,
+		Swim = 742639220, SwimIdle = 742639812, Climb = 742636889,
+		Idle = {742637544, 742638445, 885477856}
+	},
+}
+
+local function waitForAnimate(char)
+	for _ = 1, 40 do
+		local a = char:FindFirstChild("Animate")
+		if a and a:FindFirstChild("idle") and a:FindFirstChild("run") and a:FindFirstChild("walk") then
+			return a
+		end
+		task.wait(0.1)
+	end
+	return nil
+end
+
+local function setAnim(animObj, id)
+	if animObj and id then
+		animObj.AnimationId = "rbxassetid://" .. tostring(id)
+	end
+end
+
+local function stopAllTracks(hum)
+	if not hum then return end
+	for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
+		pcall(function() t:Stop(0) end)
+	end
+end
+
+local function ensureAnim(folder, name)
+	if not folder then return nil end
+	local a = folder:FindFirstChild(name)
+	if not a then
+		a = Instance.new("Animation")
+		a.Name = name
+		a.Parent = folder
+	end
+	return a
+end
+
+local function ensureIdleSlots(idleFolder, n)
+	if not idleFolder then return end
+	n = n or 2
+	for i = 1, n do
+		ensureAnim(idleFolder, "Animation" .. i)
+	end
+end
+
+local function pick(pack, ...)
+	for i = 1, select("#", ...) do
+		local k = select(i, ...)
+		local v = pack[k]
+		if v ~= nil then return v end
+	end
+	return nil
+end
+
+local previewPlayPackAnim = nil
+local stopPreviewTrack = nil
+local sync3DAvatarModel = nil
+local currentPreviewState = "Idle"
+local lastAppliedPackName = nil
+local applying = false
+
+local function applyPack(packName)
+	if applying then return false end
+	applying = true
+
+	local pack = PACKS[packName]
+	if not pack then
+		warn("Unknown pack:", packName)
+		applying = false
+		return false
+	end
+
+	local char = P.Character or P.CharacterAdded:Wait()
+	local animate = waitForAnimate(char)
+	if not animate then
+		warn("Animate not found")
+		applying = false
+		return false
+	end
+
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	stopAllTracks(hum)
+
+	local runObj = ensureAnim(animate:FindFirstChild("run"), "RunAnim")
+	local walkObj = ensureAnim(animate:FindFirstChild("walk"), "WalkAnim")
+	local jumpObj = ensureAnim(animate:FindFirstChild("jump"), "JumpAnim")
+	local fallObj = ensureAnim(animate:FindFirstChild("fall"), "FallAnim")
+	local climbObj = ensureAnim(animate:FindFirstChild("climb"), "ClimbAnim")
+	local swimObj = ensureAnim(animate:FindFirstChild("swim"), "Swim")
+	local swimIdleObj = ensureAnim(animate:FindFirstChild("swimidle"), "SwimIdle")
+	local idleFolder = animate:FindFirstChild("idle")
+
+	setAnim(walkObj, pick(pack, "WalkAnim", "Walk"))
+	setAnim(runObj, pick(pack, "RunAnim", "Run"))
+	setAnim(jumpObj, pick(pack, "JumpAnim", "Jump"))
+	setAnim(fallObj, pick(pack, "FallAnim", "Fall"))
+	setAnim(climbObj, pick(pack, "ClimbAnim", "Climb"))
+	setAnim(swimObj, pick(pack, "Swim"))
+	setAnim(swimIdleObj, pick(pack, "SwimIdle") or pick(pack, "Swim"))
+
+	if idleFolder then
+		local a1 = pick(pack, "Animation1")
+		local a2 = pick(pack, "Animation2")
+
+		if a1 or a2 then
+			ensureIdleSlots(idleFolder, 2)
+			local id1 = a1 or a2
+			local id2 = a2 or a1 or id1
+			setAnim(idleFolder:FindFirstChild("Animation1"), id1)
+			setAnim(idleFolder:FindFirstChild("Animation2"), id2)
+		elseif pack.Idle and #pack.Idle > 0 then
+			ensureIdleSlots(idleFolder, math.max(2, #pack.Idle))
+			setAnim(idleFolder:FindFirstChild("Animation1"), pack.Idle[1])
+			setAnim(idleFolder:FindFirstChild("Animation2"), pack.Idle[2] or pack.Idle[1])
+			for i = 3, #pack.Idle do
+				local a = idleFolder:FindFirstChild("Animation" .. i)
+				if a then setAnim(a, pack.Idle[i]) end
+			end
+		end
+	end
+
+	animate.Disabled = true
+	task.wait(0.06)
+	animate.Disabled = false
+
+	if hum then
+		pcall(function()
+			hum:ChangeState(Enum.HumanoidStateType.Landed)
+			task.wait(0.03)
+			hum:ChangeState(Enum.HumanoidStateType.Running)
+		end)
+	end
+
+	lastAppliedPackName = packName
+	skipSavedAnimOnce = false
+	saveAnimPackToDisk(packName)
+
+	if previewPlayPackAnim then
+		previewPlayPackAnim(packName, currentPreviewState)
+	end
+
+	applying = false
+	return true
+end
+
+local function resetAnimationPackAndKill()
+	lastAppliedPackName = nil
+	skipSavedAnimOnce = true
+	clearSavedAnimPackFromDisk()
+	if stopPreviewTrack then
+		stopPreviewTrack()
+	end
+
+	local char = P.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	stopAllTracks(hum)
+	if hum then
+		pcall(function()
+			hum.Health = 0
+		end)
+		local head = char and char:FindFirstChild("Head")
+		if head and hum.Health > 0 then
+			pcall(function() head:BreakJoints() end)
+		end
+	end
+end
+
+-- ==========================================
+-- DONATION & PURCHASE PROMPT
+-- ==========================================
+local function triggerDonationEffect(targetUser, robuxAmount)
+	local character = P.Character
+	if character and character:FindFirstChild("HumanoidRootPart") then
+		local rootPart = character.HumanoidRootPart
+		local attachment = Instance.new("Attachment")
+		attachment.Parent = rootPart
+
+		local emitter = Instance.new("ParticleEmitter")
+		emitter.Name = "RobuxParticles"
+		emitter.Texture = "rbxasset://textures/ui/common/robux@3x.png"
+		emitter.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+		emitter.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.2), NumberSequenceKeypoint.new(1, 0)})
+		emitter.Lifetime = NumberRange.new(1.0, 1.8)
+		emitter.Rate = 0
+		emitter.Speed = NumberRange.new(8, 16)
+		emitter.SpreadAngle = Vector2.new(60, 60)
+		emitter.Acceleration = Vector3.new(0, -8, 0)
+		emitter.Parent = attachment
+
+		emitter:Emit(40)
+		task.delay(2.5, function() attachment:Destroy() end)
+	end
+
+	local NotifGui = Instance.new("ScreenGui")
+	NotifGui.Name = "SynapseHub_DonationNotification"
+	NotifGui.ResetOnSpawn = false
+	NotifGui.IgnoreGuiInset = true
+	NotifGui.DisplayOrder = 999999
+	NotifGui.Parent = PG
+
+	local banner = Instance.new("Frame")
+	banner.Name = "Banner"
+	banner.AnchorPoint = Vector2.new(0.5, 0)
+	banner.Position = UDim2.new(0.5, 0, 0, -60)
+	banner.Size = UDim2.fromOffset(420, 50)
+	banner.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+	banner.BorderSizePixel = 0
+	banner.Parent = NotifGui
+	corner(banner, 10)
+	stroke(banner, Color3.fromRGB(60, 60, 70), 1.2)
+	addShadow(banner)
+
+	local notifIcon = Instance.new("ImageLabel")
+	notifIcon.Position = UDim2.new(0, 12, 0.5, -12)
+	notifIcon.Size = UDim2.fromOffset(24, 24)
+	notifIcon.BackgroundTransparency = 1
+	notifIcon.Image = "rbxasset://textures/ui/common/robux@3x.png"
+	notifIcon.Parent = banner
+
+	local notifText = Instance.new("TextLabel")
+	notifText.Position = UDim2.new(0, 48, 0, 0)
+	notifText.Size = UDim2.new(1, -56, 1, 0)
+	notifText.BackgroundTransparency = 1
+	notifText.Text = "Successfully donated " .. formatRobux(robuxAmount) .. " Robux to " .. targetUser .. "!"
+	notifText.TextColor3 = C.lightGray
+	notifText.Font = Enum.Font.GothamBold
+	notifText.TextSize = 13
+	notifText.TextXAlignment = Enum.TextXAlignment.Left
+	notifText.Parent = banner
+
+	TweenService:Create(banner, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Position = UDim2.new(0.5, 0, 0, 20)
+	}):Play()
+
+	task.delay(3.5, function()
+		local closeTween = TweenService:Create(banner, TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.In), {
+			Position = UDim2.new(0.5, 0, 0, -60),
+			BackgroundTransparency = 1
+		})
+
+		for _, obj in ipairs(banner:GetDescendants()) do
+			if obj:IsA("GuiObject") then
+				TweenService:Create(obj, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+			elseif obj:IsA("TextLabel") then
+				TweenService:Create(obj, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+			elseif obj:IsA("ImageLabel") then
+				TweenService:Create(obj, TweenInfo.new(0.3), {ImageTransparency = 1}):Play()
+			end
+		end
+
+		closeTween:Play()
+		closeTween.Completed:Connect(function() NotifGui:Destroy() end)
+	end)
+end
+
+local function createPurchasePrompt(targetUser, robuxAmount)
+	local Gui = Instance.new("ScreenGui")
+	Gui.Name = "SynapseHub_PurchasePrompt"
+	Gui.ResetOnSpawn = false
+	Gui.IgnoreGuiInset = true
+	Gui.DisplayOrder = 999999
+	Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	Gui.Parent = PG
+
+	local backdrop = Instance.new("Frame")
+	backdrop.Name = "Backdrop"
+	backdrop.Size = UDim2.new(1, 0, 1, 0)
+	backdrop.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	backdrop.BackgroundTransparency = 1
+	backdrop.BorderSizePixel = 0
+	backdrop.ZIndex = 1
+	backdrop.Parent = Gui
+
+	local Panel = Instance.new("Frame")
+	Panel.Name = "PromptPanel"
+	Panel.AnchorPoint = Vector2.new(.5, .5)
+	Panel.Position = UDim2.new(.5, 0, .5, 50)
+	Panel.Size = UDim2.fromOffset(450, 220)
+	Panel.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+	Panel.BackgroundTransparency = 1
+	Panel.BorderSizePixel = 0
+	Panel.Active = true
+	Panel.ZIndex = 2
+	Panel.Parent = Gui
+	corner(Panel, 14)
+	stroke(Panel, C.promptBorder, 1.2)
+	addShadow(Panel)
+
+	task.spawn(function()
+		TweenService:Create(backdrop, TweenInfo.new(0.3, Enum.EasingStyle.Sine), {BackgroundTransparency = 0.45}):Play()
+		TweenService:Create(Panel, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			BackgroundTransparency = 0
+		}):Play()
+
+		for _, obj in ipairs(Panel:GetDescendants()) do
+			if obj:IsA("GuiObject") and obj.Name ~= "DropShadow" and obj.Name ~= "FillBar" then
+				local origTrans = obj.BackgroundTransparency
+				obj.BackgroundTransparency = 1
+				TweenService:Create(obj, TweenInfo.new(0.3), {BackgroundTransparency = origTrans}):Play()
+			elseif obj:IsA("TextLabel") or obj:IsA("TextButton") then
+				local origTextTrans = obj.TextTransparency
+				obj.TextTransparency = 1
+				TweenService:Create(obj, TweenInfo.new(0.3), {TextTransparency = origTextTrans}):Play()
+			end
+		end
+	end)
+
+	local topBar = Instance.new("Frame")
+	topBar.Position = UDim2.fromOffset(20, 16)
+	topBar.Size = UDim2.new(1, -40, 0, 28)
+	topBar.BackgroundTransparency = 1
+	topBar.ZIndex = 5
+	topBar.Parent = Panel
+
+	local titleLbl = Instance.new("TextLabel")
+	titleLbl.Size = UDim2.new(0, 200, 1, 0)
+	titleLbl.BackgroundTransparency = 1
+	titleLbl.Text = "Öğe satın al"
+	titleLbl.TextColor3 = C.lightGray
+	titleLbl.Font = Enum.Font.GothamBold
+	titleLbl.TextSize = 16
+	titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+	titleLbl.ZIndex = 5
+	titleLbl.Parent = topBar
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Position = UDim2.new(1, -24, 0, 2)
+	closeBtn.Size = UDim2.fromOffset(24, 24)
+	closeBtn.BackgroundTransparency = 1
+	closeBtn.Text = ""
+	closeBtn.ZIndex = 6
+	closeBtn.Parent = topBar
+
+	local function createCrossLine(rot)
+		local line = Instance.new("Frame")
+		line.AnchorPoint = Vector2.new(0.5, 0.5)
+		line.Position = UDim2.new(0.5, 0, 0.5, 0)
+		line.Size = UDim2.new(0, 14, 0, 2)
+		line.BackgroundColor3 = C.lightGray
+		line.BorderSizePixel = 0
+		line.Rotation = rot
+		line.ZIndex = 6
+		line.Parent = closeBtn
+		corner(line, 1)
+	end
+	createCrossLine(45)
+	createCrossLine(-45)
+
+	closeBtn.MouseButton1Click:Connect(function()
+		Gui:Destroy()
+	end)
+
+	local balanceContainer = Instance.new("Frame")
+	balanceContainer.Position = UDim2.new(1, -110, 0, 2)
+	balanceContainer.Size = UDim2.fromOffset(125, 24)
+	balanceContainer.BackgroundTransparency = 1
+	balanceContainer.ZIndex = 5
+	balanceContainer.Parent = topBar
+
+	local robuxIconTop = Instance.new("ImageLabel")
+	robuxIconTop.Position = UDim2.new(0, 0, 0.5, -8.5)
+	robuxIconTop.Size = UDim2.fromOffset(17, 17)
+	robuxIconTop.BackgroundTransparency = 1
+	robuxIconTop.Image = "rbxasset://textures/ui/common/robux@3x.png"
+	robuxIconTop.ZIndex = 5
+	robuxIconTop.Parent = balanceContainer
+
+	local balanceLbl = Instance.new("TextLabel")
+	balanceLbl.Position = UDim2.new(0, 21, 0, 0)
+	balanceLbl.Size = UDim2.new(1, -21, 1, 0)
+	balanceLbl.BackgroundTransparency = 1
+	balanceLbl.Text = formatRobux(_G.SynapseBalance)
+	balanceLbl.TextColor3 = C.lightGray
+	balanceLbl.Font = Enum.Font.GothamBold
+	balanceLbl.TextSize = 13
+	balanceLbl.TextXAlignment = Enum.TextXAlignment.Left
+	balanceLbl.ZIndex = 5
+	balanceLbl.Parent = balanceContainer
+
+	local itemIcon = Instance.new("ImageLabel")
+	itemIcon.Position = UDim2.fromOffset(20, 60)
+	itemIcon.Size = UDim2.fromOffset(64, 64)
+	itemIcon.BackgroundColor3 = Color3.fromRGB(34, 34, 40)
+	itemIcon.BorderSizePixel = 0
+	itemIcon.ZIndex = 5
+	itemIcon.Parent = Panel
+	corner(itemIcon, 8)
+
+	task.spawn(function()
+		pcall(function()
+			local userId = Players:GetUserIdFromNameAsync(targetUser)
+			if userId then
+				local content, isReady = Players:GetUserThumbnailAsync(userId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
+				if isReady then
+					itemIcon.Image = content
+				end
+			end
+		end)
+	end)
+
+	local itemName = Instance.new("TextLabel")
+	itemName.Position = UDim2.new(0, 96, 0, 60)
+	itemName.Size = UDim2.new(1, -116, 0, 22)
+	itemName.BackgroundTransparency = 1
+	itemName.Text = targetUser .. " - Donation Pass"
+	itemName.TextColor3 = C.lightGray
+	itemName.Font = Enum.Font.GothamBold
+	itemName.TextSize = 15
+	itemName.TextXAlignment = Enum.TextXAlignment.Left
+	itemName.ZIndex = 5
+	itemName.Parent = Panel
+
+	local priceContainer = Instance.new("Frame")
+	priceContainer.Position = UDim2.new(0, 96, 0, 88)
+	priceContainer.Size = UDim2.fromOffset(120, 24)
+	priceContainer.BackgroundTransparency = 1
+	priceContainer.ZIndex = 5
+	priceContainer.Parent = Panel
+
+	local robuxIconPrice = Instance.new("ImageLabel")
+	robuxIconPrice.Position = UDim2.new(0, 0, 0.5, -8.5)
+	robuxIconPrice.Size = UDim2.fromOffset(17, 17)
+	robuxIconPrice.BackgroundTransparency = 1
+	robuxIconPrice.Image = "rbxasset://textures/ui/common/robux@3x.png"
+	robuxIconPrice.ZIndex = 6
+	robuxIconPrice.Parent = priceContainer
+
+	local itemPrice = Instance.new("TextLabel")
+	itemPrice.Position = UDim2.new(0, 21, 0, 0)
+	itemPrice.Size = UDim2.new(1, -21, 1, 0)
+	itemPrice.BackgroundTransparency = 1
+	itemPrice.Text = formatRobux(robuxAmount)
+	itemPrice.TextColor3 = C.mutedGray
+	itemPrice.Font = Enum.Font.GothamBold
+	itemPrice.TextSize = 14
+	itemPrice.TextXAlignment = Enum.TextXAlignment.Left
+	itemPrice.ZIndex = 6
+	itemPrice.Parent = priceContainer
+
+	local buyBtn = Instance.new("TextButton")
+	buyBtn.Position = UDim2.fromOffset(20, 146)
+	buyBtn.Size = UDim2.new(1, -40, 0, 42)
+	buyBtn.BackgroundColor3 = Color3.fromRGB(20, 35, 70)
+	buyBtn.BorderSizePixel = 0
+	buyBtn.Text = ""
+	buyBtn.AutoButtonColor = false
+	buyBtn.Active = false
+	buyBtn.ZIndex = 5
+	buyBtn.Parent = Panel
+	corner(buyBtn, 8)
+
+	local fillBar = Instance.new("Frame")
+	fillBar.Name = "FillBar"
+	fillBar.Position = UDim2.new(0, 0, 0, 0)
+	fillBar.Size = UDim2.new(0, 0, 1, 0)
+	fillBar.BackgroundColor3 = C.fillBlue
+	fillBar.BorderSizePixel = 0
+	fillBar.ZIndex = 6
+	fillBar.Parent = buyBtn
+	corner(fillBar, 8)
+
+	local btnText = Instance.new("TextLabel")
+	btnText.Size = UDim2.new(1, 0, 1, 0)
+	btnText.BackgroundTransparency = 1
+	btnText.Text = "Satın Al"
+	btnText.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btnText.Font = Enum.Font.GothamBold
+	btnText.TextSize = 14
+	btnText.ZIndex = 7
+	btnText.Parent = buyBtn
+
+	task.spawn(function()
+		local fillTween = TweenService:Create(fillBar, TweenInfo.new(3.0, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+			Size = UDim2.new(1, 0, 1, 0)
+		})
+		fillTween:Play()
+		fillTween.Completed:Wait()
+		buyBtn.Active = true
+	end)
+
+	buyBtn.MouseButton1Click:Connect(function()
+		if not buyBtn.Active then return end
+		buyBtn.Active = false
+
+		_G.SynapseBalance = math.max(0, _G.SynapseBalance - robuxAmount)
+		fillBar.BackgroundColor3 = Color3.fromRGB(10, 40, 100)
+
+		task.wait(1.0)
+
+		TweenService:Create(backdrop, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
+
+		local vanishTween = TweenService:Create(Panel, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+			Position = UDim2.new(0.5, 0, 0.5, -40),
+			BackgroundTransparency = 1
+		})
+
+		for _, obj in ipairs(Panel:GetDescendants()) do
+			if obj:IsA("GuiObject") and obj.Name ~= "DropShadow" then
+				TweenService:Create(obj, TweenInfo.new(0.4), {BackgroundTransparency = 1}):Play()
+			elseif obj:IsA("TextLabel") or obj:IsA("TextButton") then
+				TweenService:Create(obj, TweenInfo.new(0.4), {TextTransparency = 1}):Play()
+			elseif obj:IsA("ImageLabel") then
+				TweenService:Create(obj, TweenInfo.new(0.4), {ImageTransparency = 1}):Play()
+			end
+		end
+
+		vanishTween:Play()
+		vanishTween.Completed:Connect(function()
+			Gui:Destroy()
+			triggerDonationEffect(targetUser, robuxAmount)
+		end)
+	end)
+end
+
+-- ==========================================
+-- ANA PANEL, SOL PROFİL / 3D VIEWPORT VE SEKMELER
+-- ==========================================
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "SynapseHub_MorpherEdition"
+Gui.ResetOnSpawn = false
+Gui.IgnoreGuiInset = true
+Gui.DisplayOrder = 999999
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.Parent = PG
+
+local Panel = Instance.new("Frame")
+Panel.Name = "MainPanel"
+Panel.AnchorPoint = Vector2.new(.5, .5)
+Panel.Position = UDim2.new(.5, 0, .5, 0)
+Panel.Size = UDim2.fromOffset(560, 246)
+Panel.BackgroundColor3 = C.panelBg
+Panel.BorderSizePixel = 0
+Panel.Active = true
+Panel.Parent = Gui
+corner(Panel, 18)
+stroke(Panel, C.borderPurple, 1.4)
+addShadow(Panel)
+
+local sideBar = Instance.new("Frame")
+sideBar.Position = UDim2.fromOffset(12, 12)
+sideBar.Size = UDim2.new(0, 148, 1, -24)
+sideBar.BackgroundColor3 = C.darkPurple
+sideBar.BorderSizePixel = 0
+sideBar.Active = true
+sideBar.Parent = Panel
+corner(sideBar, 12)
+stroke(sideBar, C.borderPurple, 1)
+
+local brandLbl = Instance.new("TextLabel")
+brandLbl.Position = UDim2.fromOffset(8, 8)
+brandLbl.Size = UDim2.new(1, -16, 0, 20)
+brandLbl.BackgroundTransparency = 1
+brandLbl.Text = "SYNAPSE HUB"
+brandLbl.TextColor3 = C.lightGray
+brandLbl.Font = Enum.Font.FredokaOne
+brandLbl.TextSize = 12
+brandLbl.TextXAlignment = Enum.TextXAlignment.Center
+brandLbl.Parent = sideBar
+
+local divider1 = Instance.new("Frame")
+divider1.Position = UDim2.fromOffset(10, 32)
+divider1.Size = UDim2.new(1, -20, 0, 1)
+divider1.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+divider1.BackgroundTransparency = 0.5
+divider1.BorderSizePixel = 0
+divider1.Parent = sideBar
+
+-- 1) DÜZ HEADSHOT PROFİL RESMİ (Morpher & Donate için)
+local profileImg = Instance.new("ImageLabel")
+profileImg.Name = "HeadShotPreview"
+profileImg.Position = UDim2.fromOffset(10, 40)
+profileImg.Size = UDim2.new(1, -20, 1, -48)
+profileImg.BackgroundTransparency = 1
+profileImg.Image = "rbxassetid://0"
+profileImg.ScaleType = Enum.ScaleType.Fit
+profileImg.Visible = true
+profileImg.Parent = sideBar
+corner(profileImg, 10)
+
+-- 2) 3D AVATAR VIEWPORT + IDLE/RUN/JUMP BUTONLARI (Sadece Anim Packs için)
+local anim3DContainer = Instance.new("Frame")
+anim3DContainer.Name = "Anim3DContainer"
+anim3DContainer.Position = UDim2.fromOffset(8, 38)
+anim3DContainer.Size = UDim2.new(1, -16, 1, -46)
+anim3DContainer.BackgroundTransparency = 1
+anim3DContainer.Visible = false
+anim3DContainer.Parent = sideBar
+
+local vpFrame = Instance.new("ViewportFrame")
+vpFrame.Name = "Avatar3DViewport"
+vpFrame.Position = UDim2.new(0, 0, 0, 0)
+vpFrame.Size = UDim2.new(1, 0, 1, -26)
+vpFrame.BackgroundColor3 = C.cardDark
+vpFrame.BorderSizePixel = 0
+vpFrame.Ambient = Color3.fromRGB(215, 215, 230)
+vpFrame.LightColor = Color3.fromRGB(255, 255, 255)
+vpFrame.LightDirection = Vector3.new(-1, -1, -1)
+vpFrame.Parent = anim3DContainer
+corner(vpFrame, 10)
+stroke(vpFrame, C.borderPurple, 0.8)
+
+local worldModel = Instance.new("WorldModel")
+worldModel.Parent = vpFrame
+
+local vpCamera = Instance.new("Camera")
+vpCamera.FieldOfView = 35
+vpFrame.CurrentCamera = vpCamera
+vpCamera.Parent = vpFrame
+
+local stateBar = Instance.new("Frame")
+stateBar.Position = UDim2.new(0, 0, 1, -22)
+stateBar.Size = UDim2.new(1, 0, 0, 22)
+stateBar.BackgroundTransparency = 1
+stateBar.Parent = anim3DContainer
+
+local stateButtons = {}
+local stateNames = { "Idle", "Run", "Jump" }
+
+local previewModel = nil
+local previewAnimator = nil
+local activePreviewTrack = nil
+
+local function updateStateButtonColors()
+	for name, btn in pairs(stateButtons) do
+		local selected = (name == currentPreviewState)
+		btn.BackgroundColor3 = selected and C.buttonPurple or C.cardDark
+		btn.TextColor3 = selected and C.lightGray or C.mutedGray
+	end
+end
+
+stopPreviewTrack = function()
+	if activePreviewTrack then
+		pcall(function() activePreviewTrack:Stop(0.1) end)
+		activePreviewTrack = nil
+	end
+end
+
+local function positionCameraOnRig(rig)
+	local root = rig and (rig:FindFirstChild("HumanoidRootPart") or rig:FindFirstChild("UpperTorso") or rig:FindFirstChild("Torso"))
+	if not root then return end
+	local camPos = root.Position + (root.CFrame.LookVector * 8.2) + Vector3.new(0, 0.4, 0)
+	vpCamera.CFrame = CFrame.lookAt(camPos, root.Position + Vector3.new(0, 0.1, 0))
+end
+
+local function getPackAnimIdForState(packName, stateName)
+	local pack = PACKS[packName]
+	if not pack then return nil end
+
+	if stateName == "Run" then
+		return pack.RunAnim or pack.Run or pack.WalkAnim or pack.Walk
+	elseif stateName == "Jump" then
+		return pack.JumpAnim or pack.Jump or pack.FallAnim or pack.Fall
+	else
+		if type(pack.Idle) == "table" and #pack.Idle > 0 then
+			return pack.Idle[1]
+		end
+		return pack.Animation1 or pack.Animation2 or pack.WalkAnim or pack.Walk
+	end
+end
+
+previewPlayPackAnim = function(packName, stateName)
+	if packName then lastAppliedPackName = packName end
+	if stateName then currentPreviewState = stateName end
+	updateStateButtonColors()
+
+	stopPreviewTrack()
+	if not previewAnimator or not lastAppliedPackName then return end
+
+	local animId = getPackAnimIdForState(lastAppliedPackName, currentPreviewState)
+	if not animId then return end
+
+	local anim = Instance.new("Animation")
+	anim.AnimationId = "rbxassetid://" .. tostring(animId)
+	local ok, track = pcall(function() return previewAnimator:LoadAnimation(anim) end)
+	if ok and track then
+		track.Looped = true
+		track:Play(0.15)
+		activePreviewTrack = track
+	end
+end
+
+for idx, sName in ipairs(stateNames) do
+	local btn = Instance.new("TextButton")
+	btn.Position = UDim2.new((idx - 1) / 3, idx == 1 and 0 or 2, 0, 0)
+	btn.Size = UDim2.new(1 / 3, idx == 2 and -4 or -2, 1, 0)
+	btn.BackgroundColor3 = (sName == currentPreviewState) and C.buttonPurple or C.cardDark
+	btn.TextColor3 = (sName == currentPreviewState) and C.lightGray or C.mutedGray
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 9
+	btn.Text = sName
+	btn.BorderSizePixel = 0
+	btn.Parent = stateBar
+	corner(btn, 5)
+	stroke(btn, C.borderPurple, 0.7)
+
+	btn.Activated:Connect(function()
+		currentPreviewState = sName
+		updateStateButtonColors()
+		if lastAppliedPackName then
+			previewPlayPackAnim(lastAppliedPackName, sName)
+		end
+	end)
+
+	stateButtons[sName] = btn
+end
+
+sync3DAvatarModel = function(sourceModel)
+	stopPreviewTrack()
+	if previewModel then
+		previewModel:Destroy()
+		previewModel = nil
+		previewAnimator = nil
+	end
+
+	local target = sourceModel or P.Character
+	if not target then return end
+
+	pcall(function() target.Archivable = true end)
+	local ok, clone = pcall(function() return target:Clone() end)
+	if not ok or not clone then return end
+
+	clone.Name = "Synapse3DPreviewRig"
+	for _, d in ipairs(clone:GetDescendants()) do
+		if d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Sound") then
+			d:Destroy()
+		elseif d:IsA("BasePart") then
+			d.Anchored = false
+			d.CanCollide = false
+			d.Massless = true
+		end
+	end
+
+	local root = clone:FindFirstChild("HumanoidRootPart")
+	if root then
+		root.Anchored = true
+		clone.PrimaryPart = root
+		clone:PivotTo(CFrame.new(0, 0, 0))
+	end
+
+	clone.Parent = worldModel
+	previewModel = clone
+
+	local hum = clone:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator")
+		animator.Parent = hum
+		previewAnimator = animator
+	end
+
+	positionCameraOnRig(clone)
+
+	if lastAppliedPackName and PACKS[lastAppliedPackName] then
+		previewPlayPackAnim(lastAppliedPackName, currentPreviewState)
+	end
+end
+
+-- 3 Sekme Butonu (Morpher / Robux Donate / Anim Packs)
+local tabsBar = Instance.new("Frame")
+tabsBar.Position = UDim2.fromOffset(172, 12)
+tabsBar.Size = UDim2.new(0, 376, 0, 26)
+tabsBar.BackgroundTransparency = 1
+tabsBar.Parent = Panel
+
+local tabMorphBtn = Instance.new("TextButton")
+tabMorphBtn.Position = UDim2.new(0, 0, 0, 0)
+tabMorphBtn.Size = UDim2.new(1/3, -5, 1, 0)
+tabMorphBtn.BackgroundColor3 = C.buttonPurple
+tabMorphBtn.BorderSizePixel = 0
+tabMorphBtn.Text = "Morpher"
+tabMorphBtn.TextColor3 = C.lightGray
+tabMorphBtn.Font = Enum.Font.GothamBold
+tabMorphBtn.TextSize = 11
+tabMorphBtn.Parent = tabsBar
+corner(tabMorphBtn, 6)
+
+local tabDonateBtn = Instance.new("TextButton")
+tabDonateBtn.Position = UDim2.new(1/3, 2.5, 0, 0)
+tabDonateBtn.Size = UDim2.new(1/3, -5, 1, 0)
+tabDonateBtn.BackgroundColor3 = C.cardDark
+tabDonateBtn.BorderSizePixel = 0
+tabDonateBtn.Text = "Robux Donate"
+tabDonateBtn.TextColor3 = C.mutedGray
+tabDonateBtn.Font = Enum.Font.GothamBold
+tabDonateBtn.TextSize = 11
+tabDonateBtn.Parent = tabsBar
+corner(tabDonateBtn, 6)
+stroke(tabDonateBtn, C.borderPurple, 0.8)
+
+local tabAnimBtn = Instance.new("TextButton")
+tabAnimBtn.Position = UDim2.new(2/3, 5, 0, 0)
+tabAnimBtn.Size = UDim2.new(1/3, -5, 1, 0)
+tabAnimBtn.BackgroundColor3 = C.cardDark
+tabAnimBtn.BorderSizePixel = 0
+tabAnimBtn.Text = "Anim Packs"
+tabAnimBtn.TextColor3 = C.mutedGray
+tabAnimBtn.Font = Enum.Font.GothamBold
+tabAnimBtn.TextSize = 11
+tabAnimBtn.Parent = tabsBar
+corner(tabAnimBtn, 6)
+stroke(tabAnimBtn, C.borderPurple, 0.8)
+
+-- MORPHER İÇERİĞİ
+local morphContent = Instance.new("Frame")
+morphContent.Position = UDim2.fromOffset(172, 44)
+morphContent.Size = UDim2.new(0, 376, 1, -56)
+morphContent.BackgroundColor3 = C.darkPurple
+morphContent.BorderSizePixel = 0
+morphContent.Parent = Panel
+corner(morphContent, 12)
+stroke(morphContent, C.borderPurple, 1)
+
+local resetBtn = Instance.new("TextButton")
+resetBtn.Position = UDim2.new(1, -24, 0, 6)
+resetBtn.Size = UDim2.fromOffset(16, 16)
+resetBtn.BackgroundTransparency = 1
+resetBtn.Text = "R"
+resetBtn.TextColor3 = C.mutedGray
+resetBtn.Font = Enum.Font.GothamBold
+resetBtn.TextSize = 12
+resetBtn.Parent = morphContent
+
+local toggleListBtn = Instance.new("TextButton")
+toggleListBtn.Position = UDim2.new(1, -44, 0, 6)
+toggleListBtn.Size = UDim2.fromOffset(16, 16)
+toggleListBtn.BackgroundTransparency = 1
+toggleListBtn.Text = "▼"
+toggleListBtn.TextColor3 = C.mutedGray
+toggleListBtn.Font = Enum.Font.GothamBold
+toggleListBtn.TextSize = 10
+toggleListBtn.Parent = morphContent
+
+local morphTitle = Instance.new("TextLabel")
+morphTitle.Position = UDim2.fromOffset(12, 6)
+morphTitle.Size = UDim2.new(1, -60, 0, 20)
+morphTitle.BackgroundTransparency = 1
+morphTitle.Text = "CHARACTER MORPHER"
+morphTitle.TextColor3 = C.lightGray
+morphTitle.Font = Enum.Font.FredokaOne
+morphTitle.TextSize = 12
+morphTitle.TextXAlignment = Enum.TextXAlignment.Left
+morphTitle.Parent = morphContent
+
+local textBox = Instance.new("TextBox")
+textBox.Position = UDim2.fromOffset(12, 34)
+textBox.Size = UDim2.new(1, -24, 0, 34)
+textBox.BackgroundColor3 = C.cardDark
+textBox.BorderSizePixel = 0
+textBox.Text = ""
+textBox.PlaceholderText = "Target username..."
+textBox.PlaceholderColor3 = C.mutedGray
+textBox.TextColor3 = C.lightGray
+textBox.Font = Enum.Font.GothamBold
+textBox.TextSize = 11
+textBox.ClearTextOnFocus = false
+textBox.Parent = morphContent
+corner(textBox, 8)
+stroke(textBox, C.borderPurple, 0.8)
+
+local executeBtn = Instance.new("TextButton")
+executeBtn.Position = UDim2.fromOffset(12, 78)
+executeBtn.Size = UDim2.new(1, -24, 0, 36)
+executeBtn.BackgroundColor3 = C.buttonPurple
+executeBtn.BorderSizePixel = 0
+executeBtn.Text = "MORPH"
+executeBtn.TextColor3 = Color3.fromRGB(245, 245, 255)
+executeBtn.Font = Enum.Font.GothamBold
+executeBtn.TextSize = 12
+executeBtn.Parent = morphContent
+corner(executeBtn, 8)
+stroke(executeBtn, Color3.fromRGB(150, 60, 240), 1)
+
+local statusVal = Instance.new("TextLabel")
+statusVal.Position = UDim2.fromOffset(12, 126)
+statusVal.Size = UDim2.new(1, -24, 0, 20)
+statusVal.BackgroundTransparency = 1
+statusVal.Text = "Status: Morpher ready."
+statusVal.TextColor3 = C.mutedGray
+statusVal.Font = Enum.Font.GothamMedium
+statusVal.TextSize = 9
+statusVal.TextXAlignment = Enum.TextXAlignment.Left
+statusVal.Parent = morphContent
+
+-- DONATE İÇERİĞİ
+local donateContent = Instance.new("Frame")
+donateContent.Position = UDim2.fromOffset(172, 44)
+donateContent.Size = UDim2.new(0, 376, 1, -56)
+donateContent.BackgroundColor3 = C.darkPurple
+donateContent.BorderSizePixel = 0
+donateContent.Visible = false
+donateContent.Parent = Panel
+corner(donateContent, 12)
+stroke(donateContent, C.borderPurple, 1)
+
+local donateTitle = Instance.new("TextLabel")
+donateTitle.Position = UDim2.fromOffset(12, 6)
+donateTitle.Size = UDim2.new(1, -24, 0, 20)
+donateTitle.BackgroundTransparency = 1
+donateTitle.Text = "ROBUX DONATE SYSTEM"
+donateTitle.TextColor3 = C.lightGray
+donateTitle.Font = Enum.Font.FredokaOne
+donateTitle.TextSize = 12
+donateTitle.TextXAlignment = Enum.TextXAlignment.Left
+donateTitle.Parent = donateContent
+
+local targetBox = Instance.new("TextBox")
+targetBox.Position = UDim2.fromOffset(12, 34)
+targetBox.Size = UDim2.new(1, -24, 0, 34)
+targetBox.BackgroundColor3 = C.cardDark
+targetBox.BorderSizePixel = 0
+targetBox.Text = ""
+targetBox.PlaceholderText = "Roblox"
+targetBox.PlaceholderColor3 = C.mutedGray
+targetBox.TextColor3 = C.lightGray
+targetBox.Font = Enum.Font.GothamBold
+targetBox.TextSize = 11
+targetBox.ClearTextOnFocus = false
+targetBox.Parent = donateContent
+corner(targetBox, 8)
+stroke(targetBox, C.borderPurple, 0.8)
+
+local robuxAmountBox = Instance.new("TextBox")
+robuxAmountBox.Position = UDim2.fromOffset(12, 76)
+robuxAmountBox.Size = UDim2.new(1, -24, 0, 34)
+robuxAmountBox.BackgroundColor3 = C.cardDark
+robuxAmountBox.BorderSizePixel = 0
+robuxAmountBox.Text = "100"
+robuxAmountBox.PlaceholderText = "Amount (Robux)..."
+robuxAmountBox.PlaceholderColor3 = C.mutedGray
+robuxAmountBox.TextColor3 = C.lightGray
+robuxAmountBox.Font = Enum.Font.GothamBold
+robuxAmountBox.TextSize = 11
+robuxAmountBox.ClearTextOnFocus = false
+robuxAmountBox.Parent = donateContent
+corner(robuxAmountBox, 8)
+stroke(robuxAmountBox, C.borderPurple, 0.8)
+
+local donateBtn = Instance.new("TextButton")
+donateBtn.Position = UDim2.fromOffset(12, 122)
+donateBtn.Size = UDim2.new(1, -24, 0, 36)
+donateBtn.BackgroundColor3 = C.buttonPurple
+donateBtn.BorderSizePixel = 0
+donateBtn.Text = "CONFIRM & PURCHASE"
+donateBtn.TextColor3 = Color3.fromRGB(245, 245, 255)
+donateBtn.Font = Enum.Font.GothamBold
+donateBtn.TextSize = 11
+donateBtn.Parent = donateContent
+corner(donateBtn, 8)
+stroke(donateBtn, Color3.fromRGB(150, 60, 240), 1)
+
+-- ANIM PACKS İÇERİĞİ
+local animContent = Instance.new("Frame")
+animContent.Position = UDim2.fromOffset(172, 44)
+animContent.Size = UDim2.new(0, 376, 1, -56)
+animContent.BackgroundColor3 = C.darkPurple
+animContent.BorderSizePixel = 0
+animContent.Visible = false
+animContent.Parent = Panel
+corner(animContent, 12)
+stroke(animContent, C.borderPurple, 1)
+
+local animCurrentLbl = Instance.new("TextLabel")
+animCurrentLbl.Position = UDim2.fromOffset(10, 4)
+animCurrentLbl.Size = UDim2.new(1, -76, 0, 16)
+animCurrentLbl.BackgroundTransparency = 1
+animCurrentLbl.Text = "Current: (none)"
+animCurrentLbl.TextColor3 = C.lightGray
+animCurrentLbl.Font = Enum.Font.GothamBold
+animCurrentLbl.TextSize = 10
+animCurrentLbl.TextXAlignment = Enum.TextXAlignment.Left
+animCurrentLbl.Parent = animContent
+
+local animResetBtn = Instance.new("TextButton")
+animResetBtn.Position = UDim2.new(1, -62, 0, 4)
+animResetBtn.Size = UDim2.fromOffset(52, 16)
+animResetBtn.BackgroundColor3 = C.cardDark
+animResetBtn.BorderSizePixel = 0
+animResetBtn.Text = "Reset"
+animResetBtn.TextColor3 = C.lightGray
+animResetBtn.Font = Enum.Font.GothamBold
+animResetBtn.TextSize = 9
+animResetBtn.Parent = animContent
+corner(animResetBtn, 4)
+stroke(animResetBtn, C.borderPurple, 0.7)
+
+animResetBtn.Activated:Connect(function()
+	animCurrentLbl.Text = "Current: (none)"
+	resetAnimationPackAndKill()
+end)
+
+local animSearchBox = Instance.new("TextBox")
+animSearchBox.Position = UDim2.fromOffset(10, 22)
+animSearchBox.Size = UDim2.new(1, -20, 0, 26)
+animSearchBox.BackgroundColor3 = C.cardDark
+animSearchBox.BorderSizePixel = 0
+animSearchBox.Text = ""
+animSearchBox.PlaceholderText = "Search pack... (adidas, zombie, ninja)"
+animSearchBox.PlaceholderColor3 = C.mutedGray
+animSearchBox.TextColor3 = C.lightGray
+animSearchBox.Font = Enum.Font.Gotham
+animSearchBox.TextSize = 10
+animSearchBox.ClearTextOnFocus = false
+animSearchBox.Parent = animContent
+corner(animSearchBox, 6)
+stroke(animSearchBox, C.borderPurple, 0.8)
+
+local animScroll = Instance.new("ScrollingFrame")
+animScroll.Position = UDim2.fromOffset(10, 52)
+animScroll.Size = UDim2.new(1, -20, 1, -58)
+animScroll.BackgroundColor3 = C.cardDark
+animScroll.BorderSizePixel = 0
+animScroll.ScrollBarThickness = 4
+animScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+animScroll.Parent = animContent
+corner(animScroll, 8)
+
+local animLayout = Instance.new("UIListLayout")
+animLayout.Padding = UDim.new(0, 4)
+animLayout.SortOrder = Enum.SortOrder.LayoutOrder
+animLayout.Parent = animScroll
+
+local animPad = Instance.new("UIPadding")
+animPad.PaddingTop = UDim.new(0, 5)
+animPad.PaddingBottom = UDim.new(0, 5)
+animPad.PaddingLeft = UDim.new(0, 5)
+animPad.PaddingRight = UDim.new(0, 5)
+animPad.Parent = animScroll
+
+local function refreshAnimCanvas()
+	task.wait()
+	animScroll.CanvasSize = UDim2.new(0, 0, 0, animLayout.AbsoluteContentSize.Y + 10)
+end
+animLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshAnimCanvas)
+
+-- ==========================================
+-- ANLIK HEADSHOT GÜNCELLEME VE SEKME YÖNETİMİ
+-- ==========================================
+local activeTab = "morph"
+local previewRequest = 0
+
+local function updateProfileImage(username)
+	previewRequest = previewRequest + 1
+	local reqId = previewRequest
+	local u = (username or ""):gsub("^%s+", ""):gsub("%s+$", "")
+
+	if u == "" then
+		if activeTab == "donate" then
+			u = "Roblox"
+		else
+			u = P.Name
+		end
+	end
+
+	task.spawn(function()
+		local success, id = pcall(function() return Players:GetUserIdFromNameAsync(u) end)
+		if success and id and reqId == previewRequest then
+			local ok, content = pcall(function()
+				return Players:GetUserThumbnailAsync(id, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+			end)
+			if ok and content and reqId == previewRequest and profileImg.Parent then
+				profileImg.Image = content
+			end
+		end
+	end)
+end
+
+local function setActiveTab(tabName)
+	activeTab = tabName
+	morphContent.Visible = (tabName == "morph")
+	donateContent.Visible = (tabName == "donate")
+	animContent.Visible = (tabName == "anim")
+
+	for btn, name in pairs({
+		[tabMorphBtn] = "morph",
+		[tabDonateBtn] = "donate",
+		[tabAnimBtn] = "anim"
+	}) do
+		local active = (name == tabName)
+		btn.BackgroundColor3 = active and C.buttonPurple or C.cardDark
+		btn.TextColor3 = active and C.lightGray or C.mutedGray
+	end
+
+	if tabName == "anim" then
+		profileImg.Visible = false
+		anim3DContainer.Visible = true
+		if not previewModel and P.Character then
+			sync3DAvatarModel(P.Character)
+		end
+	else
+		anim3DContainer.Visible = false
+		profileImg.Visible = true
+		if tabName == "morph" then
+			updateProfileImage(textBox.Text ~= "" and textBox.Text or P.Name)
+		elseif tabName == "donate" then
+			updateProfileImage(targetBox.Text ~= "" and targetBox.Text or "Roblox")
+		end
+	end
+end
+
+tabMorphBtn.MouseButton1Click:Connect(function() setActiveTab("morph") end)
+tabDonateBtn.MouseButton1Click:Connect(function() setActiveTab("donate") end)
+tabAnimBtn.MouseButton1Click:Connect(function() setActiveTab("anim") end)
+
+textBox:GetPropertyChangedSignal("Text"):Connect(function()
+	if activeTab == "morph" then
+		updateProfileImage(textBox.Text)
+	end
+end)
+
+targetBox:GetPropertyChangedSignal("Text"):Connect(function()
+	if activeTab == "donate" then
+		updateProfileImage(targetBox.Text)
+	end
+end)
+
+donateBtn.MouseButton1Click:Connect(function()
+	local target = targetBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+	if target == "" then target = "Roblox" end
+	local amount = tonumber(robuxAmountBox.Text) or 100
+	createPurchasePrompt(target, amount)
+end)
+
+-- ==========================================
+-- FILE-BASED SAVED CHARACTERS MENU (MORPHER)
+-- ==========================================
+local SavedCharacters = {}
+local fileName = "SynapseHub_SavedMorphs.json"
+
+local function loadSavedData()
+	if pcall(function() return readfile and isfile and isfile(fileName) end) then
+		local success, decoded = pcall(function()
+			return HttpService:JSONDecode(readfile(fileName))
+		end)
+		if success and type(decoded) == "table" then
+			SavedCharacters = decoded
+		end
+	end
+end
+
+local function saveToDisk()
+	pcall(function()
+		if writefile then
+			local encoded = HttpService:JSONEncode(SavedCharacters)
+			writefile(fileName, encoded)
+		end
+	end)
+end
+
+loadSavedData()
+
+local menuOpen = false
+
+local subMenu = Instance.new("Frame")
+subMenu.Name = "SavedCharsPanel"
+subMenu.AnchorPoint = Vector2.new(.5, .5)
+subMenu.Position = UDim2.new(.5, 0, .5, 0)
+subMenu.Size = UDim2.fromOffset(320, 300)
+subMenu.BackgroundColor3 = C.panelBg
+subMenu.BorderSizePixel = 0
+subMenu.Visible = false
+subMenu.Active = true
+subMenu.ClipsDescendants = true
+subMenu.Parent = Gui
+corner(subMenu, 18)
+stroke(subMenu, C.borderPurple, 1.4)
+addShadow(subMenu)
+
+local subInner = Instance.new("Frame")
+subInner.Position = UDim2.fromOffset(12, 12)
+subInner.Size = UDim2.new(1, -24, 1, -24)
+subInner.BackgroundColor3 = C.darkPurple
+subInner.BorderSizePixel = 0
+subInner.Active = true
+subInner.Parent = subMenu
+corner(subInner, 12)
+stroke(subInner, C.borderPurple, 1)
+
+local subTitle = Instance.new("TextLabel")
+subTitle.Position = UDim2.fromOffset(10, 8)
+subTitle.Size = UDim2.new(1, -20, 0, 22)
+subTitle.BackgroundTransparency = 1
+subTitle.Text = "SAVED CHARACTERS"
+subTitle.TextColor3 = C.lightGray
+subTitle.Font = Enum.Font.FredokaOne
+subTitle.TextSize = 13
+subTitle.TextXAlignment = Enum.TextXAlignment.Center
+subTitle.Parent = subInner
+
+local saveCurrentBtn = Instance.new("TextButton")
+saveCurrentBtn.Position = UDim2.fromOffset(12, 38)
+saveCurrentBtn.Size = UDim2.new(1, -24, 0, 32)
+saveCurrentBtn.BackgroundColor3 = C.buttonPurple
+saveCurrentBtn.BorderSizePixel = 0
+saveCurrentBtn.Text = "+ SAVE TARGET TO LIST"
+saveCurrentBtn.TextColor3 = C.lightGray
+saveCurrentBtn.Font = Enum.Font.GothamBold
+saveCurrentBtn.TextSize = 10
+saveCurrentBtn.Parent = subInner
+corner(saveCurrentBtn, 8)
+
+local subDivider = Instance.new("Frame")
+subDivider.Position = UDim2.fromOffset(12, 78)
+subDivider.Size = UDim2.new(1, -24, 0, 1)
+subDivider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+subDivider.BackgroundTransparency = 0.5
+subDivider.BorderSizePixel = 0
+subDivider.Parent = subInner
+
+local scroller = Instance.new("ScrollingFrame")
+scroller.Position = UDim2.fromOffset(12, 86)
+scroller.Size = UDim2.new(1, -24, 1, -96)
+scroller.BackgroundTransparency = 1
+scroller.BorderSizePixel = 0
+scroller.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroller.ScrollBarThickness = 6
+scroller.Parent = subInner
+
+local uiList = Instance.new("UIListLayout")
+uiList.SortOrder = Enum.SortOrder.LayoutOrder
+uiList.Padding = UDim.new(0, 8)
+uiList.Parent = scroller
+
+uiList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	scroller.CanvasSize = UDim2.new(0, 0, 0, uiList.AbsoluteContentSize.Y)
+end)
+
+local function getSubMenuPos()
+	local panelPos = Panel.AbsolutePosition
+	local panelSize = Panel.AbsoluteSize
+	local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+
+	local subW, subH = 320, 300
+	local targetX = panelPos.X + panelSize.X + subW/2 + 10
+	local targetY = panelPos.Y + subH/2 - 20
+
+	if targetX + subW/2 > viewport.X then
+		targetX = panelPos.X - subW/2 - 10
+	end
+	return UDim2.new(0, math.clamp(targetX, subW/2, viewport.X - subW/2), 0, math.clamp(targetY, subH/2, viewport.Y - subH/2))
+end
+
+local doMorph
+
+local function renderList()
+	for _, child in ipairs(scroller:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+
+	for i, data in ipairs(SavedCharacters) do
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(1, -4, 0, 46)
+		row.BackgroundColor3 = C.cardDark
+		row.BorderSizePixel = 0
+		row.Parent = scroller
+		corner(row, 8)
+		stroke(row, C.borderPurple, 0.8)
+
+		local rowThumb = Instance.new("ImageLabel")
+		rowThumb.Position = UDim2.fromOffset(4, 4)
+		rowThumb.Size = UDim2.fromOffset(38, 38)
+		rowThumb.BackgroundTransparency = 1
+		rowThumb.Image = "rbxassetid://0"
+		rowThumb.ScaleType = Enum.ScaleType.Fit
+		rowThumb.Parent = row
+		corner(rowThumb, 6)
+
+		task.spawn(function()
+			local success, id = pcall(function() return Players:GetUserIdFromNameAsync(data.name) end)
+			if success and id then
+				local ok, content = pcall(function()
+					return Players:GetUserThumbnailAsync(id, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
+				end)
+				if ok and content and rowThumb.Parent then
+					rowThumb.Image = content
+				end
+			end
+		end)
+
+		local nameLbl = Instance.new("TextLabel")
+		nameLbl.Position = UDim2.fromOffset(48, 4)
+		nameLbl.Size = UDim2.new(1, -125, 0, 18)
+		nameLbl.BackgroundTransparency = 1
+		nameLbl.Text = "@" .. data.name
+		nameLbl.TextColor3 = C.lightGray
+		nameLbl.Font = Enum.Font.GothamBold
+		nameLbl.TextSize = 11
+		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nameLbl.Parent = row
+
+		local deleteBtn = Instance.new("TextButton")
+		deleteBtn.Position = UDim2.new(1, -68, 0, 4)
+		deleteBtn.Size = UDim2.fromOffset(60, 18)
+		deleteBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 50)
+		deleteBtn.BorderSizePixel = 0
+		deleteBtn.Text = "DELETE"
+		deleteBtn.TextColor3 = C.lightGray
+		deleteBtn.Font = Enum.Font.GothamBold
+		deleteBtn.TextSize = 9
+		deleteBtn.Parent = row
+		corner(deleteBtn, 4)
+
+		local wearBtn = Instance.new("TextButton")
+		wearBtn.Position = UDim2.fromOffset(48, 25)
+		wearBtn.Size = UDim2.new(0.5, -30, 0, 16)
+		wearBtn.BackgroundColor3 = C.buttonPurple
+		wearBtn.BorderSizePixel = 0
+		wearBtn.Text = "WEAR"
+		wearBtn.TextColor3 = C.lightGray
+		wearBtn.Font = Enum.Font.GothamBold
+		wearBtn.TextSize = 10
+		wearBtn.Parent = row
+		corner(wearBtn, 4)
+
+		local autoBtn = Instance.new("TextButton")
+		autoBtn.Position = UDim2.new(0.5, 20, 0, 25)
+		autoBtn.Size = UDim2.new(0.5, -30, 0, 16)
+		autoBtn.BackgroundColor3 = data.auto and Color3.fromRGB(80, 180, 80) or C.cardDark
+		autoBtn.BorderSizePixel = 0
+		autoBtn.Text = data.auto and "AUTO: ON" or "AUTO: OFF"
+		autoBtn.TextColor3 = C.lightGray
+		autoBtn.Font = Enum.Font.GothamBold
+		autoBtn.TextSize = 9
+		autoBtn.Parent = row
+		corner(autoBtn, 4)
+		stroke(autoBtn, C.borderPurple, 0.8)
+
+		wearBtn.MouseButton1Click:Connect(function()
+			textBox.Text = data.name
+			if activeTab == "morph" then updateProfileImage(data.name) end
+			executeBtn.Text = "LOADING..."
+			local ok, msg = doMorph(data.name)
+			statusVal.Text = "Status: " .. msg
+			statusVal.TextColor3 = ok and Color3.fromRGB(105, 245, 135) or Color3.fromRGB(255, 60, 60)
+			executeBtn.Text = "MORPH"
+		end)
+
+		deleteBtn.MouseButton1Click:Connect(function()
+			table.remove(SavedCharacters, i)
+			saveToDisk()
+			renderList()
+			statusVal.Text = "Status: Target removed from list."
+			statusVal.TextColor3 = Color3.fromRGB(255, 188, 82)
+		end)
+
+		autoBtn.MouseButton1Click:Connect(function()
+			if not data.auto then
+				for j, d in ipairs(SavedCharacters) do
+					d.auto = (j == i)
+				end
+			else
+				data.auto = false
+			end
+			saveToDisk()
+			renderList()
+		end)
+	end
+end
+
+toggleListBtn.MouseButton1Click:Connect(function()
+	menuOpen = not menuOpen
+	if menuOpen then
+		renderList()
+		subMenu.Position = getSubMenuPos()
+		subMenu.Visible = true
+		subMenu.Size = UDim2.fromOffset(0, 300)
+		TweenService:Create(subMenu, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = UDim2.fromOffset(320, 300)
+		}):Play()
+		toggleListBtn.Text = "▲"
+	else
+		local tw = TweenService:Create(subMenu, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Size = UDim2.fromOffset(0, 300)
+		})
+		tw:Play()
+		tw.Completed:Connect(function()
+			if not menuOpen then subMenu.Visible = false end
+		end)
+		toggleListBtn.Text = "▼"
+	end
+end)
+
+saveCurrentBtn.MouseButton1Click:Connect(function()
+	local u = textBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+	if u == "" then
+		statusVal.Text = "Status: Enter a username to save."
+		statusVal.TextColor3 = Color3.fromRGB(255, 188, 82)
+		return
+	end
+
+	local exists = false
+	for _, d in ipairs(SavedCharacters) do
+		if d.name:lower() == u:lower() then exists = true; break end
+	end
+
+	if not exists then
+		table.insert(SavedCharacters, {name = u, auto = false})
+		saveToDisk()
+		renderList()
+		statusVal.Text = "Status: @" .. u .. " successfully saved!"
+		statusVal.TextColor3 = Color3.fromRGB(105, 245, 135)
+	else
+		statusVal.Text = "Status: @" .. u .. " is already in the list."
+		statusVal.TextColor3 = Color3.fromRGB(255, 188, 82)
+	end
+end)
+
+-- ==========================================
+-- LERP İLE AKICI SÜRÜKLENEBİLİR MENÜ SİSTEMİ
+-- ==========================================
+local function makeLerpDraggable(win, targets, lerpSpeed, onStep)
+	local dragging = false
+	local activeInput = nil
+	local dragStart = Vector2.zero
+	local startPos = win.Position
+	local targetPos = win.Position
+	local speed = lerpSpeed or 18
+
+	local function startDrag(input)
+		if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and not activeInput then
+			dragging = true
+			activeInput = input
+			dragStart = input.Position
+			startPos = win.Position
+			targetPos = win.Position
+		end
+	end
+
+	for _, target in ipairs(targets) do
+		target.InputBegan:Connect(startDrag)
+	end
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input == activeInput then
+			local delta = input.Position - dragStart
+			local rawX = startPos.X.Offset + delta.X
+			local rawY = startPos.Y.Offset + delta.Y
+
+			local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+			local halfW, halfH = win.AbsoluteSize.X / 2, win.AbsoluteSize.Y / 2
+
+			local minX = halfW - (viewport.X / 2)
+			local maxX = (viewport.X / 2) - halfW
+			local minY = halfH - (viewport.Y / 2)
+			local maxY = (viewport.Y / 2) - halfH
+
+			targetPos = UDim2.new(
+				0.5,
+				math.clamp(rawX, minX, maxX),
+				0.5,
+				math.clamp(rawY, minY, maxY)
+			)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input == activeInput then
+			dragging = false
+			activeInput = nil
+		end
+	end)
+
+	RunService.RenderStepped:Connect(function(dt)
+		if not win or not win.Parent then return end
+		local alpha = math.clamp(dt * speed, 0, 1)
+		local nextPos = win.Position:Lerp(targetPos, alpha)
+		win.Position = nextPos
+		if onStep then
+			onStep(dragging, nextPos)
+		end
+	end)
+end
+
+makeLerpDraggable(
+	Panel,
+	{Panel, sideBar, tabsBar, morphContent, donateContent, animContent, brandLbl, morphTitle, donateTitle, statusVal, animCurrentLbl},
+	18,
+	function(isDragging)
+		if menuOpen and subMenu.Visible and isDragging then
+			subMenu.Position = getSubMenuPos()
+		end
+	end
+)
+
+makeLerpDraggable(subMenu, {subMenu, subInner, subTitle}, 18)
+
+-- ==========================================
+-- FUNCTIONAL MOTOR (MORPHER)
+-- ==========================================
+local function createAvatar(uid)
+	local m
+	local ok = pcall(function() m = Players:CreateHumanoidModelFromUserIdAsync(uid) end)
+	if ok and m then return m end
+	local d = Players:GetHumanoidDescriptionFromUserId(uid)
+	return Players:CreateHumanoidModelFromDescription(d, Enum.HumanoidRigType.R15)
+end
+
+local MorphShell = nil; local MorphConn = nil; local Hidden = {}
+local MorphDescConn = nil
+local MorphVisibilityBound = false
+local MorphVisibilityStep = "SAE_MorphVisibility_" .. P.UserId
+
+local function restoreChar()
+	for o, v in pairs(Hidden) do
+		if o and o.Parent then
+			pcall(function()
+				if o:IsA("BasePart") then o.LocalTransparencyModifier = v
+				elseif o:IsA("Decal") or o:IsA("Texture") then o.Transparency = v end
+			end)
+		end
+	end
+	Hidden = {}
+end
+
+local function keepHidden(o)
+	if o:IsA("BasePart") then
+		if Hidden[o] == nil then Hidden[o] = o.LocalTransparencyModifier end
+		o.LocalTransparencyModifier = 1
+	elseif o:IsA("Decal") or o:IsA("Texture") then
+		if Hidden[o] == nil then Hidden[o] = o.Transparency end
+		o.Transparency = 1
+	end
+end
+
+local function hideChar(ch)
+	restoreChar()
+	for _, o in ipairs(ch:GetDescendants()) do keepHidden(o) end
+	MorphDescConn = ch.DescendantAdded:Connect(function(o)
+		if not MorphShell or P.Character ~= ch then return end
+		keepHidden(o)
+		for _, child in ipairs(o:GetDescendants()) do keepHidden(child) end
+	end)
+	RunService:BindToRenderStep(MorphVisibilityStep, Enum.RenderPriority.Last.Value + 1, function()
+		if not MorphShell or P.Character ~= ch then return end
+		for o in pairs(Hidden) do
+			if o.Parent and o:IsDescendantOf(ch) then
+				if o:IsA("BasePart") then
+					if o.LocalTransparencyModifier ~= 1 then o.LocalTransparencyModifier = 1 end
+				elseif o:IsA("Decal") or o:IsA("Texture") then
+					if o.Transparency ~= 1 then o.Transparency = 1 end
+				end
+			end
+		end
+	end)
+	MorphVisibilityBound = true
+end
+
+local function resetMorph()
+	if MorphConn then MorphConn:Disconnect(); MorphConn = nil end
+	if MorphVisibilityBound then
+		RunService:UnbindFromRenderStep(MorphVisibilityStep)
+		MorphVisibilityBound = false
+	end
+	if MorphDescConn then MorphDescConn:Disconnect(); MorphDescConn = nil end
+	if MorphShell then MorphShell:Destroy(); MorphShell = nil end
+	restoreChar()
+	if sync3DAvatarModel then
+		sync3DAvatarModel(P.Character)
+	end
+end
+
+local function connectedParts(root)
+	local connected = {[root] = true}
+	for _, part in ipairs(root:GetConnectedParts(true)) do connected[part] = true end
+	return connected
+end
+
+local function repairAvatarRig(model, root, humanoid)
+	pcall(function() humanoid:BuildRigFromAttachments() end)
+	local connected = connectedParts(root)
+	local body = {}
+	for _, part in ipairs(model:GetChildren()) do
+		if part:IsA("BasePart") then
+			table.insert(body, part)
+			if part ~= root and not connected[part] then
+				local joint = Instance.new("WeldConstraint")
+				joint.Name = "SAE_BodyFallback"
+				joint.Part0 = root; joint.Part1 = part; joint.Parent = root
+			end
+		end
+	end
+	connected = connectedParts(root)
+	for _, item in ipairs(model:GetChildren()) do
+		if item:IsA("Accessory") then
+			local handle = item:FindFirstChild("Handle")
+			if not handle or not handle:IsA("BasePart") then return false end
+			local bodyAttachment, handleAttachment
+			for _, att in ipairs(handle:GetDescendants()) do
+				if att:IsA("Attachment") and att.Parent:IsA("BasePart") then
+					for _, part in ipairs(body) do
+						local match = part:FindFirstChild(att.Name, true)
+						if match and match:IsA("Attachment") and match.Parent:IsA("BasePart") then
+							bodyAttachment = match; handleAttachment = att; break
+						end
+					end
+				end
+				if bodyAttachment then break end
+			end
+			if bodyAttachment then
+				for _, joint in ipairs(handle:GetChildren()) do
+					if joint:IsA("JointInstance") and (joint.Name == "AccessoryWeld" or not joint.Part0 or not joint.Part1) then
+						joint:Destroy()
+					end
+				end
+				local joint = Instance.new("Weld")
+				joint.Name = "AccessoryWeld"
+				joint.Part0 = bodyAttachment.Parent
+				joint.Part1 = handleAttachment.Parent
+				joint.C0 = bodyAttachment.CFrame
+				joint.C1 = handleAttachment.CFrame
+				handle.CFrame = joint.Part0.CFrame * joint.C0 * joint.C1:Inverse()
+				joint.Parent = handle
+			elseif not connected[handle] then
+				return false
+			end
+		end
+	end
+	connected = connectedParts(root)
+	for _, item in ipairs(model:GetChildren()) do
+		if item:IsA("Accessory") then
+			local handle = item:FindFirstChild("Handle")
+			for _, part in ipairs(item:GetDescendants()) do
+				if part:IsA("BasePart") and part ~= handle and not connected[part] then
+					local joint = Instance.new("WeldConstraint")
+					joint.Name = "SAE_AccessoryFallback"
+					joint.Part0 = handle; joint.Part1 = part; joint.Parent = handle
+				end
+			end
+		end
+	end
+	connected = connectedParts(root)
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") and not connected[part] then return false end
+	end
+	return true
+end
+
+doMorph = function(user)
+	local uid
+	if not pcall(function() uid = Players:GetUserIdFromNameAsync(user) end) then return false, "Username not found." end
+	local model
+	if not pcall(function() model = createAvatar(uid) end) or not model then return false, "Avatar could not be created." end
+
+	local character = P.Character
+	local realRoot = character and character:FindFirstChild("HumanoidRootPart")
+	local realHumanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = model:FindFirstChild("HumanoidRootPart")
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not realRoot or not realHumanoid or not root or not humanoid then
+		model:Destroy()
+		return false, "Character or avatar rig unavailable."
+	end
+
+	if humanoid.RigType ~= realHumanoid.RigType then
+		local matched
+		local ok = pcall(function()
+			local description = Players:GetHumanoidDescriptionFromUserIdAsync(uid)
+			matched = Players:CreateHumanoidModelFromDescriptionAsync(description, realHumanoid.RigType)
+		end)
+		model:Destroy()
+		if not ok or not matched then return false, "This avatar rig could not be matched." end
+		model = matched
+		root = model:FindFirstChild("HumanoidRootPart")
+		humanoid = model:FindFirstChildOfClass("Humanoid")
+		if not root or not humanoid then model:Destroy(); return false, "Matched avatar rig unavailable." end
+	end
+
+	local camera = workspace.CurrentCamera
+	if not camera then model:Destroy(); return false, "Camera unavailable." end
+	model.PrimaryPart = root
+	model:PivotTo(realRoot.CFrame)
+	model.Parent = camera
+	local rigOk, assembled = pcall(function() return repairAvatarRig(model, root, humanoid) end)
+	if not rigOk or not assembled or P.Character ~= character then
+		model:Destroy()
+		return false, "Avatar parts could not be attached."
+	end
+
+	for _, joint in ipairs(model:GetDescendants()) do
+		if joint:IsA("JointInstance") or joint:IsA("WeldConstraint") then
+			local p0, p1 = joint.Part0, joint.Part1
+			if (p0 and not p0:IsDescendantOf(model)) or (p1 and not p1:IsDescendantOf(model)) then
+				joint:Destroy()
+			end
+		end
+	end
+
+	local bodyPairs = {}
+	local bodyMap = {}
+	for _, part in ipairs(model:GetChildren()) do
+		if part:IsA("BasePart") then
+			local realPart = character:FindFirstChild(part.Name)
+			if not realPart or not realPart:IsA("BasePart") then
+				model:Destroy()
+				return false, "Avatar body could not match your character."
+			end
+			bodyMap[part] = realPart
+			table.insert(bodyPairs, {visual = part, real = realPart})
+		end
+	end
+
+	local function jointFrames(joint)
+		if joint:IsA("Motor6D") then
+			return joint.Part0, joint.Part1, joint.C0, joint.C1
+		elseif joint:IsA("AnimationConstraint") then
+			local a0, a1 = joint.Attachment0, joint.Attachment1
+			if a0 and a1 then return a0.Parent, a1.Parent, a0.CFrame, a1.CFrame end
+		end
+	end
+	local realJoints = {}
+	for _, joint in ipairs(character:GetDescendants()) do
+		local p0, p1, c0, c1 = jointFrames(joint)
+		if p0 and p1 and p0:IsA("BasePart") and p1:IsA("BasePart") and character:FindFirstChild(p0.Name) == p0 and character:FindFirstChild(p1.Name) == p1 then
+			realJoints[p0.Name .. "|" .. p1.Name] = {c0 = c0, c1 = c1}
+		end
+	end
+	local poseEdges = {}
+	for _, joint in ipairs(model:GetDescendants()) do
+		local p0, p1, c0, c1 = jointFrames(joint)
+		if p0 and p1 and bodyMap[p0] and bodyMap[p1] then
+			local real = realJoints[p0.Name .. "|" .. p1.Name]
+			if not real then
+				local reversed = realJoints[p1.Name .. "|" .. p0.Name]
+				if reversed then real = {c0 = reversed.c1, c1 = reversed.c0} end
+			end
+			if real then
+				table.insert(poseEdges, {
+					part0 = p0, part1 = p1, c0 = c0, c1 = c1,
+					realPart0 = bodyMap[p0], realPart1 = bodyMap[p1],
+					realC0 = real.c0, realC1 = real.c1
+				})
+			end
+		end
+	end
+	local orderedPose = {}
+	local seen = {[root] = true}
+	for _ = 1, #bodyPairs do
+		local added = false
+		for _, edge in ipairs(poseEdges) do
+			if seen[edge.part0] ~= seen[edge.part1] then
+				edge.forward = seen[edge.part0]
+				seen[edge.part0] = true
+				seen[edge.part1] = true
+				table.insert(orderedPose, edge)
+				added = true
+			end
+		end
+		if not added then break end
+	end
+
+	local accessories = {}
+	for _, item in ipairs(model:GetChildren()) do
+		if item:IsA("Accessory") then
+			local handle = item:FindFirstChild("Handle")
+			if not handle or not handle:IsA("BasePart") then
+				model:Destroy()
+				return false, "Avatar accessory could not be displayed."
+			end
+			local attachedTo
+			for _, joint in ipairs(handle:GetChildren()) do
+				if joint:IsA("JointInstance") then
+					if joint.Part0 == handle and bodyMap[joint.Part1] then attachedTo = joint.Part1; break end
+					if joint.Part1 == handle and bodyMap[joint.Part0] then attachedTo = joint.Part0; break end
+				end
+			end
+			attachedTo = attachedTo or root
+			local info = {handle = handle, body = attachedTo, offset = attachedTo.CFrame:ToObjectSpace(handle.CFrame), extras = {}}
+			for _, part in ipairs(item:GetDescendants()) do
+				if part:IsA("BasePart") and part ~= handle then
+					table.insert(info.extras, {part = part, offset = handle.CFrame:ToObjectSpace(part.CFrame)})
+				end
+			end
+			table.insert(accessories, info)
+		end
+	end
+
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.Anchored = true
+		end
+	end
+	pcall(function() humanoid.EvaluateStateMachine = false end)
+	humanoid.AutoRotate = false
+
+	local function legBottom(rig, rigType)
+		local names = (rigType == Enum.HumanoidRigType.R15) and {"LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg", "LeftUpperLeg", "RightUpperLeg"} or {"Left Leg", "Right Leg"}
+		local lowest
+		for _, name in ipairs(names) do
+			local part = rig:FindFirstChild(name)
+			if part and part:IsA("BasePart") and part.Transparency < .95 then
+				local cf, size = part.CFrame, part.Size
+				local extent = (math.abs(cf.XVector.Y) * size.X + math.abs(cf.YVector.Y) * size.Y + math.abs(cf.ZVector.Y) * size.Z) / 2
+				local bottom = cf.Position.Y - extent
+				lowest = lowest and math.min(lowest, bottom) or bottom
+			end
+		end
+		return lowest
+	end
+	local visualHeightOffset = nil
+
+	local function copyPose()
+		for _, pair in ipairs(bodyPairs) do
+			if not pair.visual.Parent or not pair.real.Parent then return false end
+		end
+		root.CFrame = realRoot.CFrame + Vector3.new(0, visualHeightOffset or 0, 0)
+		for _, edge in ipairs(orderedPose) do
+			local motion = edge.realC0:Inverse() * edge.realPart0.CFrame:Inverse() * edge.realPart1.CFrame * edge.realC1
+			if edge.forward then
+				edge.part1.CFrame = edge.part0.CFrame * edge.c0 * motion * edge.c1:Inverse()
+			else
+				edge.part0.CFrame = edge.part1.CFrame * edge.c1 * motion:Inverse() * edge.c0:Inverse()
+			end
+		end
+		if visualHeightOffset == nil then
+			local visualBottom = legBottom(model, humanoid.RigType)
+			local realBottom = legBottom(character, realHumanoid.RigType)
+			local floorY
+			if realHumanoid.FloorMaterial ~= Enum.Material.Air then
+				local params = RaycastParams.new()
+				params.FilterType = Enum.RaycastFilterType.Exclude
+				params.FilterDescendantsInstances = {character, model}
+				params.RespectCanCollide = true
+				local hit = workspace:Raycast(realRoot.Position, Vector3.new(0, -12, 0), params)
+				if hit then floorY = hit.Position.Y end
+			end
+			if visualBottom and (floorY or realBottom) then
+				visualHeightOffset = (floorY or realBottom) - visualBottom + .02
+			else
+				visualHeightOffset = (root.Size.Y - realRoot.Size.Y) / 2 + humanoid.HipHeight - realHumanoid.HipHeight
+			end
+			local shift = Vector3.new(0, visualHeightOffset, 0)
+			for _, pair in ipairs(bodyPairs) do pair.visual.CFrame = pair.visual.CFrame + shift end
+		end
+		for _, info in ipairs(accessories) do
+			info.handle.CFrame = info.body.CFrame * info.offset
+			for _, extra in ipairs(info.extras) do
+				extra.part.CFrame = info.handle.CFrame * extra.offset
+			end
+		end
+		return true
+	end
+	if not copyPose() then model:Destroy(); return false, "Character changed during morph." end
+
+	resetMorph()
+	model.Name = "SAE_MorphShell"
+	MorphShell = model
+	if sync3DAvatarModel then
+		sync3DAvatarModel(model)
+	end
+	MorphConn = RunService.RenderStepped:Connect(function()
+		if MorphShell ~= model or not model:IsDescendantOf(workspace) or P.Character ~= character or not copyPose() then
+			resetMorph()
+		end
+	end)
+	hideChar(character)
+	return true, "Morphed into @" .. user
+end
+
+executeBtn.MouseButton1Click:Connect(function()
+	local u = textBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+	if u == "" then
+		statusVal.Text = "Status: Enter a username."
+		statusVal.TextColor3 = Color3.fromRGB(255, 188, 82)
+		return
+	end
+	executeBtn.Text = "LOADING..."
+	local ok, msg = doMorph(u)
+	statusVal.Text = "Status: " .. msg
+	statusVal.TextColor3 = ok and Color3.fromRGB(105, 245, 135) or Color3.fromRGB(255, 60, 60)
+	executeBtn.Text = "MORPH"
+end)
+
+resetBtn.MouseButton1Click:Connect(function()
+	resetMorph()
+	textBox.Text = P.Name
+	if activeTab == "morph" then
+		updateProfileImage(P.Name)
+	end
+	statusVal.Text = "Status: Original appearance restored."
+	statusVal.TextColor3 = Color3.fromRGB(105, 245, 135)
+end)
+
+-- Animasyon Pack Butonlarını Doldur
+local ADIDAS_TOP_ORDER = { "Adidas Sports", "Adidas Community", "Adidas Aura" }
+local adidasRank = {}
+for i, n in ipairs(ADIDAS_TOP_ORDER) do adidasRank[n] = i end
+
+local allPackNames = {}
+for name in pairs(PACKS) do table.insert(allPackNames, name) end
+
+table.sort(allPackNames, function(a, b)
+	local ra, rb = adidasRank[a], adidasRank[b]
+	if ra and rb then return ra < rb end
+	if ra then return true end
+	if rb then return false end
+	return a:lower() < b:lower()
+end)
+
+local animButtonsByName = {}
+for i, name in ipairs(allPackNames) do
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, 0, 0, 26)
+	btn.BackgroundColor3 = Color3.fromRGB(35, 22, 60)
+	btn.TextColor3 = C.lightGray
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 10
+	btn.Text = name
+	btn.LayoutOrder = i
+	btn.BorderSizePixel = 0
+	btn.Parent = animScroll
+	corner(btn, 6)
+	stroke(btn, C.borderPurple, 0.7)
+
+	btn.Activated:Connect(function()
+		local ok = applyPack(name)
+		animCurrentLbl.Text = ok and ("Current: " .. name) or ("Current: (failed) " .. name)
+	end)
+	animButtonsByName[name] = btn
+end
+refreshAnimCanvas()
+
+local function filterAnimPacks(text)
+	text = (text or ""):lower()
+	for name, btn in pairs(animButtonsByName) do
+		btn.Visible = (text == "") or (name:lower():find(text, 1, true) ~= nil)
+	end
+	refreshAnimCanvas()
+end
+
+animSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	filterAnimPacks(animSearchBox.Text)
+end)
+
+local function checkAndAutoMorph()
+	for _, data in ipairs(SavedCharacters) do
+		if data.auto then
+			task.spawn(function()
+				local char = P.Character or P.CharacterAdded:Wait()
+				local root = char:WaitForChild("HumanoidRootPart", 10)
+				if not root then task.wait(1) end
+
+				local ok, msg = doMorph(data.name)
+				if ok then
+					textBox.Text = data.name
+					if activeTab == "morph" then
+						updateProfileImage(data.name)
+					end
+					statusVal.Text = "Status: Auto-morphed into @" .. data.name
+					statusVal.TextColor3 = Color3.fromRGB(105, 245, 135)
+				else
+					statusVal.Text = "Status: Auto-morph failed (" .. msg .. ")"
+					statusVal.TextColor3 = Color3.fromRGB(255, 60, 60)
+				end
+			end)
+			break
+		end
+	end
+end
+
+P.CharacterAdded:Connect(function(newChar)
+	resetMorph()
+	textBox.Text = P.Name
+	if activeTab == "morph" then
+		updateProfileImage(P.Name)
+	end
+	task.spawn(function()
+		newChar:WaitForChild("HumanoidRootPart", 10)
+		task.wait(0.6)
+		if sync3DAvatarModel and not MorphShell then
+			sync3DAvatarModel(newChar)
+		end
+		if skipSavedAnimOnce then
+			skipSavedAnimOnce = false
+		else
+			local saved = loadAnimPackFromDisk()
+			if saved and PACKS[saved] then
+				animCurrentLbl.Text = "Current: " .. saved .. " (saved)"
+				applyPack(saved)
+			end
+		end
+		checkAndAutoMorph()
+	end)
+end)
+
+-- Başlangıç
+textBox.Text = P.Name
+updateProfileImage(P.Name)
+
+if P.Character then
+	task.defer(function()
+		if sync3DAvatarModel then
+			sync3DAvatarModel(P.Character)
+		end
+		if skipSavedAnimOnce then
+			skipSavedAnimOnce = false
+		else
+			local saved = loadAnimPackFromDisk()
+			if saved and PACKS[saved] then
+				animCurrentLbl.Text = "Current: " .. saved .. " (saved)"
+				task.wait(0.2)
+				applyPack(saved)
+			end
+		end
+	end)
+end
+checkAndAutoMorph()
